@@ -25,8 +25,8 @@ impl<M: MultiMillerLoop> UnivariateKzg<M> {
         pp: &UnivariateKzgProverParam<M>,
         coeffs: &[M::Scalar],
     ) -> UnivariateKzgCommitment<M::G1Affine> {
-        let comm = variable_base_msm(coeffs, &pp.powers_of_s_g1[..coeffs.len()]).into();
-        UnivariateKzgCommitment(comm)
+        let comm = variable_base_msm(coeffs, &pp.powers_of_s_g1[..coeffs.len()]).into(); // bases created by generator
+        UnivariateKzgCommitment(comm) // result is a curve point value
     }
 }
 
@@ -250,7 +250,7 @@ where
 
         Ok(Self::commit_coeffs(pp, poly.coeffs()))
     }
-
+    // univariate kzg, commitment scheme used by protostar test example
     fn batch_commit<'a>(
         pp: &Self::ProverParam,
         polys: impl IntoIterator<Item = &'a Self::Polynomial>,
@@ -312,7 +312,7 @@ where
         let beta = transcript.squeeze_challenge();
         let gamma = transcript.squeeze_challenge();
 
-        let max_set_len = sets.iter().map(|set| set.polys.len()).max().unwrap();
+        let max_set_len = Iterator::max(sets.iter().map(|set| set.polys.len())).unwrap();
         let powers_of_beta = powers(beta).take(max_set_len).collect_vec();
         let powers_of_gamma = powers(gamma).take(sets.len()).collect_vec();
         let (fs, (qs, rs)) = sets
@@ -394,7 +394,7 @@ where
 
         let z = transcript.squeeze_challenge();
 
-        let max_set_len = sets.iter().map(|set| set.polys.len()).max().unwrap();
+        let max_set_len = Iterator::max(sets.iter().map(|set| set.polys.len())).unwrap();
         let powers_of_beta = powers(beta).take(max_set_len).collect_vec();
         let powers_of_gamma = powers(gamma).take(sets.len()).collect_vec();
 

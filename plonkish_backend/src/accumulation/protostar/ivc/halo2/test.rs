@@ -391,6 +391,8 @@ where
     let secondary_num_vars = num_vars;
     let secondary_atp = strawman::accumulation_transcript_param();
 
+    // preprocess to obtain two circuits and pp + vp
+    // primary_circuit is an object that compiles into halo2 circuit
     let (mut primary_circuit, mut secondary_circuit, ivc_pp, ivc_vp) = preprocess::<
         C,
         P1,
@@ -409,9 +411,11 @@ where
         seeded_std_rng(),
     )
     .unwrap();
-
+    
+    // these cicuits are fed into prove_steps
+    // prove_steps initiates accumulators, a primary and a secondary one (what are these for???)
     let (primary_acc, mut secondary_acc, secondary_last_instances) = prove_steps(
-        &ivc_pp,
+        &ivc_pp, // from preprocess
         &mut primary_circuit,
         &mut secondary_circuit,
         num_steps,
@@ -496,7 +500,7 @@ where
     )
 }
 
-#[test]
+#[test] // 63s
 fn gemini_kzg_ipa_protostar_hyperplonk_ivc() {
     const NUM_VARS: usize = 14;
     const NUM_STEPS: usize = 3;
@@ -507,7 +511,7 @@ fn gemini_kzg_ipa_protostar_hyperplonk_ivc() {
     >(NUM_VARS, NUM_STEPS);
 }
 
-#[test]
+#[test] // 1490.25s
 fn gemini_kzg_ipa_protostar_hyperplonk_ivc_with_aggregation() {
     const NUM_VARS: usize = 14;
     const NUM_STEPS: usize = 3;
@@ -524,9 +528,9 @@ fn gemini_kzg_ipa_protostar_hyperplonk_ivc_with_aggregation() {
         secondary_last_instances,
         secondary_proof,
     ) = run_protostar_hyperplonk_ivc::<
-        bn256::G1Affine,
-        Gemini<UnivariateKzg<Bn256>>,
-        MultilinearIpa<grumpkin::G1Affine>,
+        bn256::G1Affine, // using bn256 curve
+        Gemini<UnivariateKzg<Bn256>>, // using KZG commitment scheme for primary accumulator
+        MultilinearIpa<grumpkin::G1Affine>, // using multilinear inner product argument for secondary accumulator
     >(NUM_VARS, NUM_STEPS);
 
     let (secondary_aggregation_vp, secondary_aggregation_instances, secondary_aggregation_proof) = {
@@ -762,7 +766,7 @@ mod strawman {
         fn from_proof(spec: Self::Param, proof: &[u8]) -> Self {
             Self {
                 state: Poseidon::new_with_spec(spec),
-                stream: Cursor::new(proof.to_vec()),
+                stream: Cursor::new(proof.to_vec()), // cursor is an in memory file I/O buffer
             }
         }
     }
@@ -771,14 +775,14 @@ mod strawman {
         for PoseidonTranscript<N, S>
     {
         fn squeeze_challenge(&mut self) -> F {
-            let hash = self.state.squeeze();
-            self.state.update(&[hash]);
+            let hash = self.state.squeeze(); // hash output
+            self.state.update(&[hash]); // update input with the hash output
 
-            fe_from_le_bytes(&hash.to_repr().as_ref()[..NUM_CHALLENGE_BYTES])
+            fe_from_le_bytes(&hash.to_repr().as_ref()[..NUM_CHALLENGE_BYTES]) // returns the output as a field element (field element from little endian bytes) limited to a certain byte number
         }
 
         fn common_field_element(&mut self, fe: &F) -> Result<(), crate::Error> {
-            self.state.update(&fe_to_limbs(*fe, NUM_LIMB_BITS));
+            self.state.update(&fe_to_limbs(*fe, NUM_LIMB_BITS)); // fe_to_limbs converts a field element to another field element with a specific word size
 
             Ok(())
         }
@@ -820,8 +824,8 @@ mod strawman {
         C::Base: FromUniformBytes<64>,
         C::Scalar: PrimeFieldBits,
     {
-        fn common_commitment(&mut self, ec_point: &C) -> Result<(), crate::Error> {
-            self.state.update(&x_y_is_identity(ec_point));
+        fn common_commitment(&mut self, ec_point: &C) -> Result<(), crate::Error> { // update the poseidon object state with committed curve x y coordinates
+            self.state.update(&x_y_is_identity(ec_point)); // x_y_is_identity returns coords and is_identity bool flag
             Ok(())
         }
     }
@@ -858,12 +862,12 @@ mod strawman {
         C::Base: FromUniformBytes<64>,
         C::Scalar: PrimeFieldBits,
     {
-        fn write_commitment(&mut self, ec_point: &C) -> Result<(), crate::Error> {
+        fn write_commitment(&mut self, ec_point: &C) -> Result<(), crate::Error> { // CurveAffine is commited point
             self.common_commitment(ec_point)?;
             let coordinates = ec_point.coordinates().unwrap();
             for coordinate in [coordinates.x(), coordinates.y()] {
                 let repr = coordinate.to_repr();
-                self.stream
+                self.stream // cursor inmemory I/O buffer object
                     .write_all(repr.as_ref())
                     .map_err(|err| crate::Error::Transcript(err.kind(), err.to_string()))?;
             }
@@ -1695,7 +1699,7 @@ mod strawman {
         ) -> Result<(), Error> {
             value
                 .assigned_cells()
-                .for_each(|value| self.poseidon_chip.update(&[*value]));
+                .for_each(|value| self.poseidon_chip.update(&[*value])); // update the state so that the challenge can be squeezed
             Ok(())
         }
 

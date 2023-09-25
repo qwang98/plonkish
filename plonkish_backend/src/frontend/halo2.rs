@@ -46,9 +46,9 @@ pub trait CircuitExt<F: Field>: Circuit<F> {
 pub struct Halo2Circuit<F: Field, C: Circuit<F>> {
     k: u32,
     instances: Vec<Vec<F>>,
-    circuit: C,
+    circuit: C, // this is the Halo2 backend circuit that implements all the without_witness, configure, synthesize traits
     cs: ConstraintSystem<F>,
-    config: C::Config,
+    config: C::Config, // raw halo2 config
     constants: Vec<Column<Fixed>>,
     num_witness_polys: Vec<usize>,
     advice_idx_in_phase: Vec<usize>,
@@ -222,15 +222,15 @@ impl<F: Field, C: Circuit<F>> PlonkishCircuit<F> for Halo2Circuit<F, C> {
     fn instances(&self) -> &[Vec<F>] {
         &self.instances
     }
-
+    // PlonkishCircuit trait synthesize function implementation
     fn synthesize(&self, phase: usize, challenges: &[F]) -> Result<Vec<Vec<F>>, crate::Error> {
         let instances = self.instances.iter().map(Vec::as_slice).collect_vec();
-        let mut witness_collector = WitnessCollector {
-            k: self.k,
-            phase: phase as u8,
+        let mut witness_collector = WitnessCollector { // this is basically the ConstraintSystem 
+            k: self.k, // 2^k is the max allowed number of coefficients in a polynomial
+            phase: phase as u8, // number of rounds from protostar
             advice_idx_in_phase: &self.advice_idx_in_phase,
             challenge_idx: &self.challenge_idx,
-            instances: instances.as_slice(),
+            instances: instances.as_slice(), // each instance is a vector
             advices: vec![vec![F::ZERO.into(); 1 << self.k]; self.num_witness_polys[phase]],
             challenges,
             row_mapping: &self.row_mapping,
@@ -240,11 +240,11 @@ impl<F: Field, C: Circuit<F>> PlonkishCircuit<F> for Halo2Circuit<F, C> {
             &mut witness_collector,
             &self.circuit,
             self.config.clone(),
-            self.constants.clone(),
+            self.constants.clone(), // fixed column
         )
         .map_err(|err| crate::Error::InvalidSnark(format!("Synthesize failure: {err:?}")))?;
 
-        Ok(batch_invert_assigned(witness_collector.advices))
+        Ok(batch_invert_assigned(witness_collector.advices)) // inverted witness assignment value
     }
 }
 

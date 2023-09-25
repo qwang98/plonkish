@@ -52,17 +52,17 @@ pub trait AccumulationScheme<F: Field>: Clone + Debug {
         transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Self::Pcs>, F>,
         rng: impl RngCore,
     ) -> Result<(), Error>;
-
-    fn prove_accumulation_from_nark(
+    // invoked at each step
+    fn prove_accumulation_from_nark( // invokes prove_nark and prove_accumulation
         pp: &Self::ProverParam,
         accumulator: impl BorrowMut<Self::Accumulator>,
         circuit: &impl PlonkishCircuit<F>,
         transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Self::Pcs>, F>,
         mut rng: impl RngCore,
     ) -> Result<(), Error> {
-        let nark = Self::prove_nark(pp, circuit, transcript, &mut rng)?;
+        let nark = Self::prove_nark(pp, circuit, transcript, &mut rng)?; // invoke prove_nark
         let incoming = Self::init_accumulator_from_nark(pp, nark)?;
-        Self::prove_accumulation::<true>(pp, accumulator, &incoming, transcript, &mut rng)?;
+        Self::prove_accumulation::<true>(pp, accumulator, &incoming, transcript, &mut rng)?;  // incoming is an accumulator instance as well, created from nark
         Ok(())
     }
 
@@ -126,7 +126,7 @@ pub trait AccumulationScheme<F: Field>: Clone + Debug {
 }
 
 #[derive(Clone, Debug)]
-pub struct PlonkishNark<F, Pcs>
+pub struct PlonkishNark<F, Pcs> // similar variables to ProtostarAccumulator, which also has error term polynomial here
 where
     F: Field,
     Pcs: PolynomialCommitmentScheme<F>,
@@ -153,6 +153,7 @@ where
     }
 }
 
+// similar to ProtostarAccumulatorInstance, which also has commitment to error term and slack variable here
 #[derive(Clone, Debug)]
 pub struct PlonkishNarkInstance<F, C> {
     instances: Vec<Vec<F>>,
@@ -160,7 +161,7 @@ pub struct PlonkishNarkInstance<F, C> {
     witness_comms: Vec<C>,
 }
 
-impl<F, C> PlonkishNarkInstance<F, C> {
+impl<F, C> PlonkishNarkInstance<F, C> { 
     fn new(instances: Vec<Vec<F>>, challenges: Vec<F>, witness_comms: Vec<C>) -> Self {
         Self {
             instances,

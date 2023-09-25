@@ -28,22 +28,23 @@ use std::{
     hash::Hash,
     iter,
 };
-
+ 
+ // this entire function seems to put instance values into random positions of the poly vector and convert it to a multilinear polynomial???
 pub(crate) fn instance_polys<'a, F: PrimeField>(
     num_vars: usize,
     instances: impl IntoIterator<Item = impl IntoIterator<Item = &'a F>>,
 ) -> Vec<MultilinearPolynomial<F>> {
-    let row_mapping = HyperPlonk::<()>::row_mapping(num_vars);
+    let row_mapping = HyperPlonk::<()>::row_mapping(num_vars); // not really sure what this row_mapping function does but generates 2^num_vars element vector with 0 as the last element
     instances
         .into_iter()
-        .map(|instances| {
+        .map(|instances| { // each instances in the map closure is a Vec<F>
             let mut poly = vec![F::ZERO; 1 << num_vars];
             for (b, instance) in row_mapping.iter().zip(instances.into_iter()) {
-                poly[*b] = *instance;
+                poly[*b] = *instance; // poly has 2^num_vars elements, there are also 2^num_vars in row_mapping (b), and instances is probably a Vec<F> with 2^num_vars elements, this populates the entire poly vector
             }
             poly
         })
-        .map(MultilinearPolynomial::new)
+        .map(MultilinearPolynomial::new) // take this poly vector as the evals of multilinear polynomials
         .collect()
 }
 

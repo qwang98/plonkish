@@ -120,11 +120,11 @@ impl BooleanHypercube {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-        iter::once(0)
-            .chain(iter::successors(Some(1), |b| {
+        iter::once(0) // 0 is always the first element
+            .chain(iter::successors(Some(1), |b| { // chain appends additional items to the iterator; successors starts the iter with 1, and b is the result of each iterator, which is fed into next()
                 next(*b, self.num_vars, self.primitive).into()
             }))
-            .take(1 << self.num_vars)
+            .take(1 << self.num_vars) // take the 2^num_vars elements
     }
 
     pub fn nth_map(&self) -> Vec<usize> {
@@ -141,9 +141,9 @@ impl BooleanHypercube {
 }
 
 #[inline(always)]
-fn next(mut b: usize, num_vars: usize, primitive: usize) -> usize {
-    b <<= 1;
-    b ^= (b >> num_vars) * primitive;
+fn next(mut b: usize, num_vars: usize, primitive: usize) -> usize { // im not really sure what this is doing
+    b <<= 1; // double
+    b ^= (b >> num_vars) * primitive; // discard the last num_vars bits of b, multiply by primitive, and xor with original b
     b
 }
 

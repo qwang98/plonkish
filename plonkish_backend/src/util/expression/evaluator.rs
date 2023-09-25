@@ -7,16 +7,16 @@ use std::{fmt::Debug, ops::Deref};
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ExpressionRegistry<F: Field> {
     offsets: Offsets,
-    constants: Vec<F>,
+    constants: Vec<F>, // distinct values of constants registered
     has_identity: bool,
-    lagranges: Vec<i32>,
-    eq_xys: Vec<usize>,
+    lagranges: Vec<i32>, // distinct values of lagranges registered
+    eq_xys: Vec<usize>, // ...
     rotations: Vec<Rotation>,
-    polys: Vec<(Query, usize)>,
-    calculations: Vec<Calculation<ValueSource>>,
-    indexed_calculations: Vec<Calculation<usize>>,
-    outputs: Vec<ValueSource>,
-    indexed_outputs: Vec<usize>,
+    polys: Vec<(Query, usize)>, // (query, rotation)
+    calculations: Vec<Calculation<ValueSource>>, // calculation wrapping ValueSource objects
+    indexed_calculations: Vec<Calculation<usize>>, // Calculation wrapping index (usize) of inner ValueSource objects
+    outputs: Vec<ValueSource>, // nested ValueSource which contains index of each ValueSource type
+    indexed_outputs: Vec<usize>, // output ValueSource inner idx plus the offsets of the corresponding ValueSource type
 }
 
 impl<F: Field> ExpressionRegistry<F> {
@@ -29,23 +29,24 @@ impl<F: Field> ExpressionRegistry<F> {
     }
 
     pub(crate) fn register(&mut self, expression: &Expression<F>) {
-        let output = self.register_expression(expression);
+        // this step pushes the distinct expression types to ExpressionRegistry's corresponding variables
+        let output = self.register_expression(expression); // output of ValueSource usually contains the index of the expression in a specific registry type, e.g. ValueSource::Constant(idx), ValueSource::Calculation(idx)
         self.offsets = Offsets::new(
             self.constants.len(),
             self.lagranges.len(),
             self.eq_xys.len(),
             self.polys.len(),
         );
-        self.indexed_calculations = self
+        self.indexed_calculations = self // indexed calculations are Calculation<ValueSource> whose inner ValueSource idx are offset (added) by the length of each already registered expression type
             .calculations
             .iter()
             .map(|calculation| calculation.indexed(&self.offsets))
-            .collect();
-        self.outputs.push(output);
+            .collect(); 
+        self.outputs.push(output); // output should be a nested ValueSource type that contains the indices of the expressions from the ExpressionRegistry
         self.indexed_outputs = self
             .outputs
             .iter()
-            .map(|output| output.indexed(&self.offsets))
+            .map(|output| output.indexed(&self.offsets)) // add offset of each ValueSource type (their current lengths) to the output ValueSource
             .collect();
     }
 
@@ -83,11 +84,11 @@ impl<F: Field> ExpressionRegistry<F> {
 
     pub(crate) fn cache(&self) -> Vec<F> {
         let mut cache = vec![F::ZERO; self.offsets.calculations() + self.calculations.len()];
-        cache[..self.constants.len()].clone_from_slice(&self.constants);
+        cache[..self.constants.len()].clone_from_slice(&self.constants); // clones self.constants to occupy [..self.constants.len()] indices of cache array
         cache
     }
 
-    fn register_value<T: Eq + Clone>(
+    fn register_value<T: Eq + Clone>( // returns the index of item if it exists in the field (obtained from the field closure), otherwise, append it to the field and return its new index
         &mut self,
         field: impl FnOnce(&mut Self) -> &mut Vec<T>,
         item: &T,
@@ -131,36 +132,36 @@ impl<F: Field> ExpressionRegistry<F> {
     fn register_calculation(&mut self, calculation: Calculation<ValueSource>) -> ValueSource {
         ValueSource::Calculation(self.register_value(|ev| &mut ev.calculations, &calculation))
     }
-
+    // index of different fields is wrapped by enums from ValueSource
     fn register_expression(&mut self, expr: &Expression<F>) -> ValueSource {
         match expr {
-            Expression::Constant(constant) => self.register_constant(constant),
+            Expression::Constant(constant) => self.register_constant(constant), // ValueSource::Constant(idx)
             Expression::CommonPolynomial(poly) => match poly {
-                CommonPolynomial::Identity => self.register_identity(),
-                CommonPolynomial::Lagrange(i) => self.register_lagrange(*i),
-                CommonPolynomial::EqXY(idx) => self.register_eq_xy(*idx),
+                CommonPolynomial::Identity => self.register_identity(), // ValueSource::Identity, no wrapped value
+                CommonPolynomial::Lagrange(i) => self.register_lagrange(*i),  // ValueSource::Lagrange(idx), idx is the index of the lagrange in the registry, not the i from Lagrange
+                CommonPolynomial::EqXY(idx) => self.register_eq_xy(*idx), // ValueSource:EqXY(idx)
             },
-            Expression::Polynomial(query) => self.register_poly(query),
+            Expression::Polynomial(query) => self.register_poly(query), // ValueSource::Poly(idx), where idx is for the (query, rotation) tuple, and rotation is registered separately as an idx as well (rather than a ValueSource)
             Expression::Challenge(_) => unreachable!(),
             Expression::Negated(value) => {
                 if let Expression::Constant(constant) = value.deref() {
-                    self.register_constant(&-*constant)
+                    self.register_constant(&-*constant) // returns ValueSource::Constant(idx)
                 } else {
-                    let value = self.register_expression(value);
-                    if let ValueSource::Constant(idx) = value {
+                    let value = self.register_expression(value); // recursively call register_expression to get the contents within
+                    if let ValueSource::Constant(idx) = value { // if the value is already an unpacked ValueSource::Constant(idx), then just register the negated inner constant of it
                         self.register_constant(&-self.constants[idx])
                     } else {
-                        self.register_calculation(Calculation::Negated(value))
+                        self.register_calculation(Calculation::Negated(value)) // ValueSource::Calculation(idx)
                     }
                 }
             }
             Expression::Sum(lhs, rhs) => match (lhs.deref(), rhs.deref()) {
-                (minuend, Expression::Negated(subtrahend))
+                (minuend, Expression::Negated(subtrahend)) // the case that involves a negated number in either minuend or subtrahend
                 | (Expression::Negated(subtrahend), minuend) => {
-                    let minuend = self.register_expression(minuend);
-                    let subtrahend = self.register_expression(subtrahend);
+                    let minuend = self.register_expression(minuend); // recursive
+                    let subtrahend = self.register_expression(subtrahend); // recursive
                     match (minuend, subtrahend) {
-                        (ValueSource::Constant(minuend), ValueSource::Constant(subtrahend)) => self
+                        (ValueSource::Constant(minuend), ValueSource::Constant(subtrahend)) => self // unwrap and register constant if both minuend and subtrahend are constants
                             .register_constant(
                                 &(self.constants[minuend] - &self.constants[subtrahend]),
                             ),
@@ -171,8 +172,8 @@ impl<F: Field> ExpressionRegistry<F> {
                         _ => self.register_calculation(Calculation::Sub(minuend, subtrahend)),
                     }
                 }
-                _ => {
-                    let lhs = self.register_expression(lhs);
+                _ => { // the case that doesn't involve negated expression
+                    let lhs = self.register_expression(lhs); // register the child expression if none is negated
                     let rhs = self.register_expression(rhs);
                     match (lhs, rhs) {
                         (ValueSource::Constant(lhs), ValueSource::Constant(rhs)) => {
@@ -192,14 +193,14 @@ impl<F: Field> ExpressionRegistry<F> {
                 }
             },
             Expression::Product(lhs, rhs) => {
-                let lhs = self.register_expression(lhs);
+                let lhs = self.register_expression(lhs); // register the child expressions
                 let rhs = self.register_expression(rhs);
                 match (lhs, rhs) {
-                    (ValueSource::Constant(0), _) | (_, ValueSource::Constant(0)) => {
+                    (ValueSource::Constant(0), _) | (_, ValueSource::Constant(0)) => { // is zero if one of the multiplied is zero
                         ValueSource::Constant(0)
                     }
                     (ValueSource::Constant(1), other) | (other, ValueSource::Constant(1)) => other,
-                    (ValueSource::Constant(2), other) | (other, ValueSource::Constant(2)) => {
+                    (ValueSource::Constant(2), other) | (other, ValueSource::Constant(2)) => { // convert 2*something to something + something
                         self.register_calculation(Calculation::Add(other, other))
                     }
                     (lhs, rhs) => {
@@ -211,13 +212,13 @@ impl<F: Field> ExpressionRegistry<F> {
                     }
                 }
             }
-            Expression::Scaled(value, scalar) => {
+            Expression::Scaled(value, scalar) => { // Product is two expressions multiplied while Scaled is one expression times scalar (not exponentiation)
                 if scalar == &F::ZERO {
                     ValueSource::Constant(0)
                 } else if scalar == &F::ONE {
                     self.register_expression(value)
                 } else {
-                    let value = self.register_expression(value);
+                    let value = self.register_expression(value); // recursive
                     let scalar = self.register_constant(scalar);
                     self.register_calculation(Calculation::Mul(value, scalar))
                 }
@@ -268,7 +269,7 @@ impl Offsets {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ValueSource {
+enum ValueSource { // the wrapped usize are index of the value in the ExpressionRegistry
     Constant(usize),
     Identity,
     Lagrange(usize),
@@ -278,7 +279,8 @@ enum ValueSource {
 }
 
 impl ValueSource {
-    fn indexed(&self, offsets: &Offsets) -> usize {
+    // the returned usize is the index of the valuesource
+    fn indexed(&self, offsets: &Offsets) -> usize { // the offsets are the total length of each valuesource type that are already registered through register_expression()
         use ValueSource::*;
         match self {
             Constant(idx) => *idx,

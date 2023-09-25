@@ -85,8 +85,8 @@ pub fn variable_base_msm<'a, 'b, C: CurveAffine>(
     scalars: impl IntoIterator<Item = &'a C::Scalar>,
     bases: impl IntoIterator<Item = &'b C>,
 ) -> C::Curve {
-    let scalars = scalars.into_iter().collect_vec();
-    let bases = bases.into_iter().collect_vec();
+    let scalars = scalars.into_iter().collect_vec(); // values to commit
+    let bases = bases.into_iter().collect_vec(); // base field elements
     assert_eq!(scalars.len(), bases.len());
 
     let _timer = start_timer(|| format!("variable_base_msm-{}", scalars.len()));

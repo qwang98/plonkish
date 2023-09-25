@@ -67,9 +67,9 @@ pub trait PolynomialCommitmentScheme<F: Field>: Clone + Debug {
     where
         Self::Polynomial: 'a,
     {
-        let comms = Self::batch_commit(pp, polys)?;
+        let comms = Self::batch_commit(pp, polys)?; // UnivariateKZG uses msm for commiting the poly evals, the resulting comms are curve points of G1::Affine
         for comm in comms.iter() {
-            transcript.write_commitments(comm.as_ref())?;
+            transcript.write_commitments(comm.as_ref())?; // simply writes coordinates of committed points converted to some repr format to an in memory I/O buffer
         }
         Ok(comms)
     }

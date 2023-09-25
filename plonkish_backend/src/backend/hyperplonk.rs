@@ -36,7 +36,7 @@ pub mod util;
 pub struct HyperPlonk<Pcs>(PhantomData<Pcs>);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HyperPlonkProverParam<F, Pcs>
+pub struct HyperPlonkProverParam<F, Pcs> // ProtostarProverParam.pp
 where
     F: PrimeField,
     Pcs: PolynomialCommitmentScheme<F>,
@@ -364,7 +364,7 @@ where
 
 impl<Pcs> WitnessEncoding for HyperPlonk<Pcs> {
     fn row_mapping(k: usize) -> Vec<usize> {
-        BooleanHypercube::new(k).iter().skip(1).chain([0]).collect()
+        BooleanHypercube::new(k).iter().skip(1).chain([0]).collect() // hypercube has its own iter impelmentation, im not really sure what this is doing but iter creates a vector 2^num_vars elements whose last element is zero
     }
 }
 

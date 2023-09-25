@@ -19,8 +19,8 @@ use std::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MultilinearPolynomial<F> {
-    evals: Vec<F>,
-    num_vars: usize,
+    evals: Vec<F>, // i assume this is the number of points to interpolate for the multilinear polynomial (the evaluation values)
+    num_vars: usize, // num_vars = log2(evals.len())
 }
 
 impl<F> Default for MultilinearPolynomial<F> {
@@ -35,7 +35,7 @@ impl<F> MultilinearPolynomial<F> {
             0
         } else {
             let num_vars = evals.len().ilog2() as usize;
-            assert_eq!(evals.len(), 1 << num_vars);
+            assert_eq!(evals.len(), 1 << num_vars); // num_vars = log2(evals.len()), because it's multilinear polynomial
             num_vars
         };
 
@@ -128,11 +128,12 @@ impl<F: Field> MultilinearPolynomial<F> {
                 .collect(),
         )
     }
-
-    pub fn evaluate(&self, x: &[F]) -> F {
+    // i can't really figure out how this function works 
+    // key things happen with merge_in_place
+    pub fn evaluate(&self, x: &[F]) -> F { // x is the multidimensional point
         assert_eq!(x.len(), self.num_vars);
 
-        let mut evals = Cow::Borrowed(self.evals());
+        let mut evals = Cow::Borrowed(self.evals()); // cow is a smart pointer that clones data on write, This allows evals to use the original data unless a modification is required, at which point it will clone the data and modify the clone.
         let mut bits = Vec::new();
         let mut buf = Vec::with_capacity(self.evals.len() >> 1);
         for x_i in x.iter() {
@@ -575,7 +576,7 @@ fn bit_to_field<F: Field>(bit: bool) -> F {
         F::ZERO
     }
 }
-
+// can't really figure out how this works but key things happen with merge_into 
 fn merge_in_place<F: Field>(
     evals: &mut Cow<[F]>,
     x_i: &F,

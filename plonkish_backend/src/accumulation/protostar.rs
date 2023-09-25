@@ -21,6 +21,7 @@ use std::{iter, marker::PhantomData};
 pub mod hyperplonk;
 pub mod ivc;
 
+// AccumulationScheme trait implemented for Protostar, with ProverParam, VerifierParam, Accumulator, AccumulatorInstance
 #[derive(Clone, Debug)]
 pub struct Protostar<Pb, const STRATEGY: usize = { Compressing as usize }>(PhantomData<Pb>);
 
@@ -41,20 +42,20 @@ impl From<usize> for ProtostarStrategy {
         [NoCompressing, Compressing][strategy]
     }
 }
-
+// accumulation prover???
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtostarProverParam<F, Pb>
 where
     F: Field,
-    Pb: PlonkishBackend<F>,
+    Pb: PlonkishBackend<F>, // the backend that the prover is associated with. backend contains prover, verifier, and pcs
 {
-    pp: Pb::ProverParam,
-    strategy: ProtostarStrategy,
-    num_theta_primes: usize,
+    pp: Pb::ProverParam, // is this the prover key from preprocessing???
+    strategy: ProtostarStrategy, // accumulation verifier compression or not
+    num_theta_primes: usize, // what are theta and alpha primes???
     num_alpha_primes: usize,
-    num_folding_witness_polys: usize,
-    num_folding_challenges: usize,
-    cross_term_expressions: Vec<Expression<F>>,
+    num_folding_witness_polys: usize, // communication rounds k
+    num_folding_challenges: usize, // communication rounds k-1 (no random challenge in the last round)
+    cross_term_expressions: Vec<Expression<F>>, // error termss
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -63,7 +64,7 @@ where
     F: Field,
     Pb: PlonkishBackend<F>,
 {
-    vp: Pb::VerifierParam,
+    vp: Pb::VerifierParam, // verifier key from preprocessing???
     strategy: ProtostarStrategy,
     num_theta_primes: usize,
     num_alpha_primes: usize,
@@ -72,15 +73,17 @@ where
     num_cross_terms: usize,
 }
 
+
+// 3.4 of paper
 #[derive(Clone, Debug)]
 pub struct ProtostarAccumulator<F, Pcs>
 where
     F: Field,
     Pcs: PolynomialCommitmentScheme<F>,
 {
-    instance: ProtostarAccumulatorInstance<F, Pcs::Commitment>,
-    witness_polys: Vec<Pcs::Polynomial>,
-    e_poly: Pcs::Polynomial,
+    instance: ProtostarAccumulatorInstance<F, Pcs::Commitment>, // accumulator instance acc.x
+    witness_polys: Vec<Pcs::Polynomial>, // accumulator witness acc.w = m_i, where i = 1, ..., k, m_i are accumulated prover messages (polynomial)
+    e_poly: Pcs::Polynomial, // error term polynomial, not mentioned in the paper, but its commitment is in ProtostarAccumulatorInstance
     _marker: PhantomData<Pcs>,
 }
 
@@ -102,20 +105,20 @@ where
 {
     fn init(
         strategy: ProtostarStrategy,
-        k: usize,
+        k: usize, // number of rounds is 2k-1
         num_instances: &[usize],
         num_witness_polys: usize,
         num_challenges: usize,
     ) -> Self {
-        let zero_poly = Pcs::Polynomial::from_evals(vec![F::ZERO; 1 << k]);
+        let zero_poly = Pcs::Polynomial::from_evals(vec![F::ZERO; 1 << k]); // i think the zeros should be the coefficients, 2^k of them in total
         Self {
             instance: ProtostarAccumulatorInstance::init(
                 strategy,
                 num_instances,
-                num_witness_polys,
-                num_challenges,
+                num_witness_polys, // this is the l number of polynomials in paper
+                num_challenges, // this is the k number of challenges in paper
             ),
-            witness_polys: iter::repeat_with(|| zero_poly.clone())
+            witness_polys: iter::repeat_with(|| zero_poly.clone()) // creates infinite iterator of zero_poly and take the first num_witness_polys number of zero polies
                 .take(num_witness_polys)
                 .collect(),
             e_poly: zero_poly,
@@ -126,9 +129,9 @@ where
     fn from_nark(strategy: ProtostarStrategy, k: usize, nark: PlonkishNark<F, Pcs>) -> Self {
         let witness_polys = nark.witness_polys;
         Self {
-            instance: ProtostarAccumulatorInstance::from_nark(strategy, nark.instance),
-            witness_polys,
-            e_poly: Pcs::Polynomial::from_evals(vec![F::ZERO; 1 << k]),
+            instance: ProtostarAccumulatorInstance::from_nark(strategy, nark.instance), // copies over the instance from nark, which has witness comms, challenges, u = 1, no error term commitment yet
+            witness_polys, // copies over the witness polynomials from nark, m_i which is just polynomials
+            e_poly: Pcs::Polynomial::from_evals(vec![F::ZERO; 1 << k]), // error term polynomial, not in section 3.4 of paper, it's commitment is part of instance
             _marker: PhantomData,
         }
     }
@@ -177,13 +180,14 @@ where
     }
 }
 
+// 3.4 of paper, accumulator instance acc.x
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ProtostarAccumulatorInstance<F, C> {
-    instances: Vec<Vec<F>>,
-    witness_comms: Vec<C>,
-    challenges: Vec<F>,
-    u: F,
-    e_comm: C,
+pub struct ProtostarAccumulatorInstance<F, C> { // c is commitment
+    instances: Vec<Vec<F>>,  // pi of length k in one dimension, accumulated public input
+    witness_comms: Vec<C>,  // C_i of length k, accumulated commitments
+    challenges: Vec<F>, // r_i of length k, accumulated challenges
+    u: F, // slack variable
+    e_comm: C, // accumulated commitment to error terms
     compressed_e_sum: Option<F>,
 }
 
@@ -223,22 +227,22 @@ where
         self.compressed_e_sum.unwrap_or(F::ZERO)
     }
 
-    fn absorb_into<CommitmentChunk>(
+    fn absorb_into<CommitmentChunk>( // basically absorbs every element of the ProtostarAccumulatorInstance into PoseidonTranscript, so that we can squeeze out random challenges later
         &self,
         transcript: &mut impl Transcript<CommitmentChunk, F>,
     ) -> Result<(), Error>
     where
         C: AsRef<[CommitmentChunk]>,
     {
-        self.instances
+        self.instances // absorbs instances
             .iter()
             .try_for_each(|instances| transcript.common_field_elements(instances))?;
-        self.witness_comms
+        self.witness_comms // these are committed coordinates of curve points after msm
             .iter()
-            .try_for_each(|comm| transcript.common_commitments(comm.as_ref()))?;
-        transcript.common_field_elements(&self.challenges)?;
-        transcript.common_field_element(&self.u)?;
-        transcript.common_commitments(self.e_comm.as_ref())?;
+            .try_for_each(|comm| transcript.common_commitments(comm.as_ref()))?; // PoseidonTranscript implementation of Transcript trait function, basically updates the Poseidon object state with coordinates of the committed point
+        transcript.common_field_elements(&self.challenges)?; // absorbs challenges
+        transcript.common_field_element(&self.u)?; // absorbs u
+        transcript.common_commitments(self.e_comm.as_ref())?; // absorbs committed error term
         if let Some(compressed_e_sum) = self.compressed_e_sum.as_ref() {
             transcript.common_field_element(compressed_e_sum)?;
         }
@@ -247,11 +251,11 @@ where
 
     fn from_nark(strategy: ProtostarStrategy, nark: PlonkishNarkInstance<F, C>) -> Self {
         Self {
-            instances: nark.instances,
-            witness_comms: nark.witness_comms,
-            challenges: nark.challenges,
-            u: F::ONE,
-            e_comm: C::default(),
+            instances: nark.instances, // pi from nark
+            witness_comms: nark.witness_comms, // C_i from nark
+            challenges: nark.challenges, // r_i from nark
+            u: F::ONE, // u from nark, which is one
+            e_comm: C::default(), // E from nark
             compressed_e_sum: match strategy {
                 NoCompressing => None,
                 Compressing => Some(F::ZERO),

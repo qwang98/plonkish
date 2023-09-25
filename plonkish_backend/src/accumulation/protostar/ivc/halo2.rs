@@ -1303,8 +1303,8 @@ where
 pub struct ProtostarIvcVerifierParam<C, P1, P2, HP1, HP2>
 where
     C: TwoChainCurve,
-    HyperPlonk<P1>: PlonkishBackend<C::Scalar>,
-    HyperPlonk<P2>: PlonkishBackend<C::Base>,
+    HyperPlonk<P1>: PlonkishBackend<C::Scalar>, // scalar field
+    HyperPlonk<P2>: PlonkishBackend<C::Base>, // base field
 {
     vp_digest: C::Scalar,
     primary_vp: ProtostarVerifierParam<C::Scalar, HyperPlonk<P1>>,
@@ -1480,11 +1480,13 @@ where
         + TranscriptWrite<P2::CommitmentChunk, C::Base>
         + InMemoryTranscript,
 {
-    let mut primary_acc = Protostar::<HyperPlonk<P1>>::init_accumulator(&ivc_pp.primary_pp)?;
+    // Protostar has AccumulationScheme trait implemented
+    // these two accumulators have different PCS, one is KZG univariate (P1) according to the testing example and the other an ipa (P2)
+    let mut primary_acc = Protostar::<HyperPlonk<P1>>::init_accumulator(&ivc_pp.primary_pp)?; // HyperPlonk is the Pb or plonkish backend of Protostar, P1 is the PCS, 
     let mut secondary_acc = Protostar::<HyperPlonk<P2>>::init_accumulator(&ivc_pp.secondary_pp)?;
 
     for step_idx in 0..num_steps {
-        let primary_acc_x = primary_acc.instance.clone();
+        let primary_acc_x = primary_acc.instance.clone(); // contains C_i (commited witness), pi (public input), r_i (random challenges), u_i (slack), e_i (committed error term)
 
         let timer = start_timer(|| {
             format!(
@@ -1493,11 +1495,12 @@ where
             )
         });
         let proof = {
-            let mut transcript = AT1::new(ivc_pp.primary_atp.clone());
-            Protostar::<HyperPlonk<P1>>::prove_accumulation_from_nark(
-                &ivc_pp.primary_pp,
-                &mut primary_acc,
-                primary_circuit as &_,
+            // AT1 is a composite trait of transcript read and transcript write and in memory transcript, for P1, the first commitment scheme
+            let mut transcript = AT1::new(ivc_pp.primary_atp.clone()); // new function from InMemoryTranscript trait, which is implemented by FiatShamirTranscript
+            Protostar::<HyperPlonk<P1>>::prove_accumulation_from_nark( // AccumulationScheme trait function that contains prove_nark
+                &ivc_pp.primary_pp, // ProtostarIvcProverParam (ivc_pp) contains ProtostarProverParam which contains ProverParam
+                &mut primary_acc, // this is the accumulator to receive incoming instances
+                primary_circuit as &_, // this is an input for prove_nark, which is called by prove_accumulation_from_nark
                 &mut transcript,
                 &mut rng,
             )?;
@@ -2867,7 +2870,7 @@ where
 
         let z = transcript.squeeze_challenge(layouter)?;
 
-        let max_set_len = sets.iter().map(|set| set.polys.len()).max().unwrap();
+        let max_set_len = Iterator::max(sets.iter().map(|set| set.polys.len())).unwrap();
         let powers_of_beta = tcc_chip.powers_base(layouter, beta.as_ref(), max_set_len)?;
         let powers_of_gamma = tcc_chip.powers_base(layouter, gamma.as_ref(), sets.len())?;
 

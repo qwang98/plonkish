@@ -75,8 +75,8 @@ pub(super) fn powers_of_zeta_poly<F: PrimeField>(
     num_vars: usize,
     zeta: F,
 ) -> MultilinearPolynomial<F> {
-    let powers_of_zeta = powers(zeta).take(1 << num_vars).collect_vec();
-    let nth_map = BooleanHypercube::new(num_vars).nth_map();
+    let powers_of_zeta = powers(zeta).take(1 << num_vars).collect_vec(); // generate infinite iterator of powers of zeta and take the first 2^num_vars elements
+    let nth_map = BooleanHypercube::new(num_vars).nth_map(); 
     MultilinearPolynomial::new(par_map_collect(&nth_map, |b| powers_of_zeta[*b]))
 }
 
@@ -94,11 +94,12 @@ where
     if cross_term_expressions.is_empty() {
         return Vec::new();
     }
-
-    let ev = init_hadamard_evaluator(
-        cross_term_expressions,
-        num_vars,
-        preprocess_polys,
+    // returns a HadamardEvaluator with all the polynomials chained together (preprocess, accumulator, incoming) together with simplified expressions
+    // really not sure what is this used for???
+    let ev = init_hadamard_evaluator( 
+        cross_term_expressions, // preprocessing or new empty vector
+        num_vars, // from HyperPlonkProverParameter, a single usize
+        preprocess_polys, // multilinera poly
         accumulator,
         incoming,
     );
@@ -233,7 +234,7 @@ where
 {
     assert!(!expressions.is_empty());
 
-    let acc_instance_polys = instance_polys(num_vars, &accumulator.instance.instances);
+    let acc_instance_polys = instance_polys(num_vars, &accumulator.instance.instances); // inputs are usize and Vec<Vec<F>>
     let incoming_instance_polys = instance_polys(num_vars, &incoming.instance.instances);
     let polys = iter::empty()
         .chain(preprocess_polys.iter().map(Cow::Borrowed))
@@ -253,7 +254,7 @@ where
         .iter()
         .map(|expression| {
             expression
-                .simplified(Some(&challenges))
+                .simplified(Some(&challenges)) // can't figure out what the simplified function does???
                 .unwrap_or_else(Expression::zero)
         })
         .collect_vec();
@@ -277,15 +278,15 @@ impl<'a, F: PrimeField> HadamardEvaluator<'a, F> {
     ) -> Self {
         let mut reg = ExpressionRegistry::new();
         for expression in expressions.iter() {
-            reg.register(expression);
+            reg.register(expression); // register an expression to the Expression registry, so that each of its nested components is appended to the corresponding type of the ExpressionRegistry; also creates the output as a nested ValueSource type; each expression is converted into one nested ValueSource, so multiple expression become a output: Vec<ValueSource>
         }
         assert!(reg.eq_xys().is_empty());
 
-        let bh = BooleanHypercube::new(num_vars).iter().collect_vec();
-        let lagranges = reg
-            .lagranges()
+        let bh = BooleanHypercube::new(num_vars).iter().collect_vec(); // vector of 2^num_vars size, created using BooleanHypercube::next()
+        let lagranges = reg // not sure what this is but bh is created using a weird algorithm i couldn't figure out (see BooleanHypercube::next), now lagrange collects these calculated values using the values of bh mod 2^num_vars as the indices, again not sure why???
+            .lagranges() // lagranges are Vec<u32>, not sure why it is only a single u32 number to represent lagranges
             .iter()
-            .map(|i| bh[i.rem_euclid(1 << num_vars) as usize])
+            .map(|i| bh[i.rem_euclid(1 << num_vars) as usize]) // Calculates the least nonnegative remainder of self (mod rhs), here rhs is 2^num_vars; this basically makes sure that bh won't overflow as its length is 2^num_vars
             .collect_vec();
 
         Self {
@@ -296,7 +297,7 @@ impl<'a, F: PrimeField> HadamardEvaluator<'a, F> {
         }
     }
 
-    pub(crate) fn cache(&self) -> Vec<F> {
+    pub(crate) fn cache(&self) -> Vec<F> { // create a cache vector with all zeros except constants copied from the registry
         self.reg.cache()
     }
 

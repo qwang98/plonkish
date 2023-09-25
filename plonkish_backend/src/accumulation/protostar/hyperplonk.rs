@@ -42,6 +42,7 @@ use std::{borrow::BorrowMut, hash::Hash, iter};
 mod preprocessor;
 mod prover;
 
+// protostar implements accumulationscheme (and is the only implementation here actually)
 impl<F, Pcs, const STRATEGY: usize> AccumulationScheme<F> for Protostar<HyperPlonk<Pcs>, STRATEGY>
 where
     F: PrimeField + Hash + Serialize + DeserializeOwned,
@@ -76,10 +77,12 @@ where
         preprocess(param, circuit_info, STRATEGY.into())
     }
 
+    // create accumulator with accumulator instance (acc.x) and witness (acc.w), where witness is the witness polynomials, also has error term polynomial
+    // instance contains commitments of witness and error term plus random challenges
     fn init_accumulator(pp: &Self::ProverParam) -> Result<Self::Accumulator, Error> {
         Ok(ProtostarAccumulator::init(
             pp.strategy,
-            pp.pp.num_vars,
+            pp.pp.num_vars, // rounds
             &pp.pp.num_instances,
             pp.num_folding_witness_polys,
             pp.num_folding_challenges,
@@ -92,17 +95,17 @@ where
     ) -> Result<Self::Accumulator, Error> {
         Ok(ProtostarAccumulator::from_nark(
             pp.strategy,
-            pp.pp.num_vars,
+            pp.pp.num_vars, // why 2^num_vars is the number of evals for the error polynomial???
             nark,
         ))
     }
-
+    // implement AccumulationScheme trait function for Protostar
     fn prove_nark(
-        pp: &Self::ProverParam,
-        circuit: &impl PlonkishCircuit<F>,
-        transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Pcs>, F>,
+        pp: &Self::ProverParam, // is ProtostarProverParam in the test
+        circuit: &impl PlonkishCircuit<F>, // PlonkishCircuit is a trait; in the test, the implementing struct is frontend::halo2::Halo2Circuit
+        transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Pcs>, F>, // both P1 and P2 (accumulators) use strawman::PoseidonTranscript<_, _>, which implements TranscriptWrite
         _: impl RngCore,
-    ) -> Result<PlonkishNark<F, Pcs>, Error> {
+    ) -> Result<PlonkishNark<F, Pcs>, Error> { // resulting PlonkishNark contains instance, challenges, witness commitment, and witness poly
         let ProtostarProverParam {
             pp,
             strategy,
@@ -111,20 +114,72 @@ where
             ..
         } = pp;
 
-        let instances = circuit.instances();
-        for (num_instances, instances) in pp.num_instances.iter().zip_eq(instances) {
+        // the input `pp`
+        // accumulation::protostar::ProtostarProverParam
+        // pub struct ProtostarProverParam<F, Pb>
+        // where
+        //     F: Field,
+        //     Pb: PlonkishBackend<F>, // the backend that the prover is associated with. backend contains prover, verifier, and pcs
+        // {
+        //     pp: Pb::ProverParam, // is this the prover key from preprocessing???
+        //     strategy: ProtostarStrategy, // accumulation verifier compression or not
+        //     num_theta_primes: usize, // what are theta and alpha primes???
+        //     num_alpha_primes: usize,
+        //     num_folding_witness_polys: usize, // communication rounds k
+        //     num_folding_challenges: usize, // communication rounds k-1 (no random challenge in the last round)
+        //     cross_term_expressions: Vec<Expression<F>>, // error termss
+        // }
+
+        // the input `circuit`
+        // frontend::halo2::Halo2Circuit
+        // pub struct Halo2Circuit<F: Field, C: Circuit<F>> {
+        //     k: u32,
+        //     instances: Vec<Vec<F>>,
+        //     circuit: C,
+        //     cs: ConstraintSystem<F>,
+        //     config: C::Config,
+        //     constants: Vec<Column<Fixed>>,
+        //     num_witness_polys: Vec<usize>,
+        //     advice_idx_in_phase: Vec<usize>,
+        //     challenge_idx: Vec<usize>,
+        //     row_mapping: Vec<usize>,
+        // }
+
+        // the input `transcript`
+        // strawman::PoseidonTranscript
+        // pub struct PoseidonTranscript<F: PrimeField, S> {
+        //     state: Poseidon<F, T, RATE>,
+        //     stream: S,
+        // }
+
+        // the transcript's poseidon object first absorbs instance variables, which is basically a preparation for r_0 (the first random challenge)
+        // think of this as the prelude of r_0 <- \rho_NARK(pi) in section 3.3 of paper
+        let instances = circuit.instances(); // instances are Vec<Vec<F>> for Halo2Circuit, each outter Vec represents a round
+        for (num_instances, instances) in pp.num_instances.iter().zip_eq(instances) { // pp is the destructured HyperPlonkProverParam
             assert_eq!(instances.len(), *num_instances);
             for instance in instances.iter() {
-                transcript.common_field_element(instance)?;
+                transcript.common_field_element(instance)?; // basically loops over each F of instances: Vec<Vec<F>>; update the state of the poseidon object so that we can squeeze out challenges
             }
         }
 
         // Round 0..n
 
-        let mut witness_polys = Vec::with_capacity(pp.num_witness_polys.iter().sum());
-        let mut witness_comms = Vec::with_capacity(witness_polys.len());
+        let mut witness_polys = Vec::with_capacity(pp.num_witness_polys.iter().sum()); // num_witness_polys and all other parameters of pp (HyperPlonkProverParam) are vectorized, seems there are multiple rounds of polynomials to communicate and each round communicates multiple polynomials with number specified by this vector
+        let mut witness_comms = Vec::with_capacity(witness_polys.len()); // poly and comm have the same length
         let mut challenges = Vec::with_capacity(pp.num_challenges.iter().sum());
-        for (round, (num_witness_polys, num_challenges)) in pp
+        // for each round, create multilinera polynomials out of inverted assigned witness values from synthesizing a circuit
+        // commit these witness polynomials
+        // extend the witness polynomials, their commitments, and challenges
+
+        // multiple witness polynomials are collectively the witness of each round (w)
+        
+        // for m_i, which according to 3.3 is created by P_sps(pi, w, transcript), there's no message m_i created and committed (C_i) by prover
+        // witness is directly commited as C_i, rather than comitting the prover's message in section 3.3, where C_i <- Commit(ck, m_i)
+        // there's no commit key ck
+        
+        // randomness (challenge) generation: for each round, the transcript first absorbs the committed witness, and then simply absorbs its own hash output from last squeeze via `squeeze_challenges` before squeezing out another hash output
+        // this is consistent with 3.3, which has r_i <- \rho_nark(r_{i-1}, C_i), basically the next randomness is created by random oracle (transcript) after feeding in the last randomness and commitment
+        for (round, (num_witness_polys, num_challenges)) in pp // seems that each round is an element in the vectors, and each round can have multiple witness polys and challenges
             .num_witness_polys
             .iter()
             .zip_eq(pp.num_challenges.iter())
@@ -132,21 +187,22 @@ where
         {
             let timer = start_timer(|| format!("witness_collector-{round}"));
             let polys = circuit
-                .synthesize(round, &challenges)?
+                // round number (index from enumerate) is fed into the `phase` parameter, `synthesize` returns a Vec<Vec<F>> of inverted witness assignment values (not sure why inverted)
+                .synthesize(round, &challenges)? // challenges is an empty vector at the start; synthesize is PlonkishCircuit trait implementation, test example uses Halo2Circuit struct
                 .into_iter()
-                .map(MultilinearPolynomial::new)
+                .map(MultilinearPolynomial::new) // the inverted witness assignment matrix is converted into multiple multilinear polynomials
                 .collect_vec();
             assert_eq!(polys.len(), *num_witness_polys);
             end_timer(timer);
-
-            witness_comms.extend(Pcs::batch_commit_and_write(&pp.pcs, &polys, transcript)?);
+            // transcript absorbs committed witness
+            witness_comms.extend(Pcs::batch_commit_and_write(&pp.pcs, &polys, transcript)?); // batch commit and write commitments to transcript; commitment for P1 is univariateKZG, commited value is simply a value on a curve calculated from msm, the bases of msm are powers of a generator and the commited values are their scalar powers for the msm 
             witness_polys.extend(polys);
-            challenges.extend(transcript.squeeze_challenges(*num_challenges));
+            challenges.extend(transcript.squeeze_challenges(*num_challenges)); // call squeeze_challenge num_challenge times, implemented by PoseidonTranscript in test.rs; the squeeze_challenge function outputs hash result as a field element and updates the poseidon object's state input with the hash result, so that the next squeeze will output a different hash result; this is performed num_challenges times to generate num_challenge different "random" field elements as challenges
         }
 
         // Round n
-
-        let theta_primes = powers(transcript.squeeze_challenge())
+        // lookup implementation, not reviewed yet
+        let theta_primes = powers(transcript.squeeze_challenge()) // infinite iterator of powers of the squeezed challenge and take num_theta_primes many of the powers of challenge, the results are a vector of field elements
             .skip(1)
             .take(*num_theta_primes)
             .collect_vec();
@@ -168,14 +224,14 @@ where
         end_timer(timer);
 
         let timer = start_timer(|| format!("lookup_m_polys-{}", pp.lookups.len()));
-        let lookup_m_polys = lookup_m_polys(&lookup_compressed_polys)?;
+        let lookup_m_polys = lookup_m_polys(&lookup_compressed_polys)?; // result of lookup are multilinear polynomials
         end_timer(timer);
 
-        let lookup_m_comms = Pcs::batch_commit_and_write(&pp.pcs, &lookup_m_polys, transcript)?;
+        let lookup_m_comms = Pcs::batch_commit_and_write(&pp.pcs, &lookup_m_polys, transcript)?; // write multilinear polynomial evals to transcript as committed curve point coordinates
 
         // Round n+1
 
-        let beta_prime = transcript.squeeze_challenge();
+        let beta_prime = transcript.squeeze_challenge(); // basically create a random number hashed from the transcript (fiat shamir)
 
         let timer = start_timer(|| format!("lookup_h_polys-{}", pp.lookups.len()));
         let lookup_h_polys = lookup_h_polys(&lookup_compressed_polys, &lookup_m_polys, &beta_prime);
@@ -187,7 +243,7 @@ where
         };
 
         // Round n+2
-
+        // only related to compressing strategy, not reviewed yet
         let (zeta, powers_of_zeta_poly, powers_of_zeta_comm) = match strategy {
             NoCompressing => (None, None, None),
             Compressing => {
@@ -214,15 +270,19 @@ where
             .skip(1)
             .take(*num_alpha_primes)
             .collect_vec();
-
+        // according to 3.3, the NARK sends over all commitments C_i and all prover messages m_i in all rounds
+        // note that in this implementation, m_i is just the witness polynomials instead of m_i <- P_sps(pi, w, transcript) in 3.3
+        // the witness commitments instead of message commitments are sent over as C_i
+        // other than these, the NARK also sends over the public instances and challenges, which 3.3 didn't require, as challenges are theoretically all generated by verifier by reconstructing the transcript, and the instances should be available to both parties to start with
         Ok(PlonkishNark::new(
-            instances.to_vec(),
+            instances.to_vec(), // copied from the original Halo2Circuit, whose instance is a Vec<Vec<>>, this keeps the same format, each outter Vec represents a different round
+            // total length is: sum(num_challenges) + num_theta_prime + 1 + 1 + num_alpha_prime
             iter::empty()
-                .chain(challenges)
-                .chain(theta_primes)
-                .chain(Some(beta_prime))
-                .chain(zeta)
-                .chain(alpha_primes)
+                .chain(challenges) // length is sum of num_challenges, which is a Vec<usize>, where each usize is the num_challenges of a round
+                .chain(theta_primes) // num_theta_prime many challenges, each an incremental power of a transcript squeezed randomness (the same randomness)
+                .chain(Some(beta_prime)) // a single number
+                .chain(zeta) // Single field element, None if no compressing and Some(transcript squeezed challenge) if some
+                .chain(alpha_primes) // same as theta prime, but number is given by num_alpha_prime
                 .collect(),
             iter::empty()
                 .chain(witness_comms)
@@ -238,12 +298,14 @@ where
                 .collect(),
         ))
     }
-
+    // section 3.4 figure 3 accumulation prover
+    // AccumulationScheme trait function implementation for Protostar
+    // invoked by prove_accumulation_from_nark, which first invokes prove_nark and then invokes prove_accumulation according to AccumulationScheme trait
     fn prove_accumulation<const IS_INCOMING_ABSORBED: bool>(
-        pp: &Self::ProverParam,
-        mut accumulator: impl BorrowMut<Self::Accumulator>,
-        incoming: &Self::Accumulator,
-        transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Pcs>, F>,
+        pp: &Self::ProverParam, // trait object, implemented as ProtostarProverParam here, which contains HyperPlonkProverParam as its pp field
+        mut accumulator: impl BorrowMut<Self::Accumulator>, // ProtostarAccumulator, primary_acc, the running instance
+        incoming: &Self::Accumulator, // incoming instance to fold, initiated from nark
+        transcript: &mut impl TranscriptWrite<CommitmentChunk<F, Pcs>, F>, // proof will be converted from transcript eventually
         _: impl RngCore,
     ) -> Result<(), Error> {
         let ProtostarProverParam {
@@ -255,7 +317,8 @@ where
         } = pp;
         let accumulator = accumulator.borrow_mut();
 
-        accumulator.instance.absorb_into(transcript)?;
+        // ProtostarAccumulatorInstance implementation is in protostar.rs
+        accumulator.instance.absorb_into(transcript)?; // ProtoStarAccumulatorInstance::absorb_into, basically absorbs all elements of ProtostarAccumulatorInstance (C_i, pi, r_i, u, E, etc.), so that we can squeeze out random challenge from the PoseidonTranscript later
         if !IS_INCOMING_ABSORBED {
             incoming.instance.absorb_into(transcript)?;
         }
@@ -266,11 +329,11 @@ where
                     format!("evaluate_cross_term_polys-{}", cross_term_expressions.len())
                 });
                 let cross_term_polys = evaluate_cross_term_polys(
-                    cross_term_expressions,
+                    cross_term_expressions, // this is from ivc_pp.pp.cross_term_expressions, which is a Vec<Expressions>, obtained from preprocessing
                     pp.num_vars,
-                    &pp.preprocess_polys,
-                    accumulator,
-                    incoming,
+                    &pp.preprocess_polys, // MultilinearPolynomials
+                    accumulator, // ProtostarAccumulator, primary_acc, the running instance, (acc)
+                    incoming, // instance to fold, just converted from a nark to an accumulator at each folding step
                 );
                 end_timer(timer);
 
