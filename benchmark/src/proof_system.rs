@@ -38,7 +38,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const OUTPUT_DIR: &str = "../target/bench";
+const OUTPUT_DIR: &str = "../";
 
 // fn main() {
 //     let (systems, circuit, k_range) = parse_args();
@@ -56,6 +56,7 @@ where
         + TranscriptWrite<CommitmentChunk<Fr, B::Pcs>, Fr>
         + InMemoryTranscript,
 {
+    create_output(&[system]);
     // let circuit = C::rand(k, std_rng());
     // let circuit = Halo2Circuit::new::<B>(k, circuit);
     let circuit_info = circuit.circuit_info().unwrap();
@@ -83,18 +84,6 @@ where
     };
     assert!(accept);
 }
-
-// fn bench_hyperplonk<C: CircuitExt<Fr>>(k: usize, c: &impl PlonkishCircuit<Fr>) {
-//     type GeminiKzg = multilinear::Gemini<univariate::UnivariateKzg<Bn256>>;
-//     type HyperPlonk = backend::hyperplonk::HyperPlonk<GeminiKzg>;
-//     bench_plonkish_backend::<HyperPlonk, C>(System::HyperPlonk, k, c)
-// }
-
-// fn bench_unihyperplonk<C: CircuitExt<Fr>>(k: usize, c: &impl PlonkishCircuit<Fr>) {
-//     type UnivariateKzg = univariate::UnivariateKzg<Bn256>;
-//     type UniHyperPlonk = backend::unihyperplonk::UniHyperPlonk<UnivariateKzg, true>;
-//     bench_plonkish_backend::<UniHyperPlonk, C>(System::UniHyperPlonk, k, c)
-// }
 
 fn bench_halo2<C: CircuitExt<Fr>>(k: usize) {
     let circuit = C::rand(k, std_rng());
@@ -192,6 +181,7 @@ impl System {
     }
 
     fn output(&self) -> File {
+        println!("output_path: {}", self.output_path());
         OpenOptions::new()
             .append(true)
             .open(self.output_path())

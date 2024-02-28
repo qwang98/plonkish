@@ -85,6 +85,15 @@ impl<F: Clone> PlonkishCircuitInfo<F> {
         .collect::<BTreeSet<_>>();
         let challenges = chain![self.expressions().flat_map(Expression::used_challenge)]
             .collect::<BTreeSet<_>>();
+
+        // print all of these asserts
+        println!("num_witness_polys phases {} should equal num_challenges phases {}", self.num_witness_polys.len(), self.num_challenges.len());
+        self.num_witness_polys.iter().for_each(|n| println!("num_witness_polys {} shouldn't be zero", n));
+        // self.num_challenges[..self.num_challenges.len() - 1].iter().for_each(|n| println!("num_challenges {} shouldn't be zero", n));
+        println!("polys.last() {} should be less than num_poly {}", polys.last().unwrap(), num_poly);
+        // println!("challenges.last() {} should be less than num_challenges {}", challenges.last().unwrap(), num_challenges);
+        self.constraints.iter().for_each(|constraint| println!("constraint degree {} should be less than max_degree {}", constraint.degree(), self.max_degree.unwrap()));
+
         // Same amount of phases
         self.num_witness_polys.len() == self.num_challenges.len()
             // Every phase has some witness polys

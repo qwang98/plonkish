@@ -48,6 +48,9 @@ pub(crate) fn verify_sum_check<F: PrimeField>(
     y: &[F],
     transcript: &mut impl FieldTranscriptRead<F>,
 ) -> Result<(Vec<Vec<F>>, Vec<Evaluation<F>>), Error> {
+    
+    println!("sumcheck started");
+
     let (x_eval, x) = ClassicSumCheck::<EvaluationsProver<_>, BinaryField>::verify(
         &(),
         num_vars,
@@ -55,6 +58,8 @@ pub(crate) fn verify_sum_check<F: PrimeField>(
         sum,
         transcript,
     )?;
+
+    println!("sumcheck verified");
 
     let pcs_query = pcs_query(expression, instances.len());
     let (evals_for_rotation, evals) = pcs_query
@@ -69,15 +74,20 @@ pub(crate) fn verify_sum_check<F: PrimeField>(
         .into_iter()
         .unzip::<_, _, Vec<_>, Vec<_>>();
 
+    println!("pcs query done");
+
     let evals = instance_evals::<_, BinaryField>(num_vars, expression, instances, &x)
         .into_iter()
         .chain(evals)
         .collect();
     if evaluate::<_, BinaryField>(expression, num_vars, &evals, challenges, &[y], &x) != x_eval {
-        return Err(Error::InvalidSnark(
+        println!("invalid snark");
+        return Err(Error::InvalidSnark( 
             "Unmatched between sum_check output and query evaluation".to_string(),
         ));
     }
+
+    println!("snark valid");
 
     let point_offset = point_offset(&pcs_query);
     let evals = pcs_query
@@ -89,6 +99,9 @@ pub(crate) fn verify_sum_check<F: PrimeField>(
                 .map(|(point, eval)| Evaluation::new(query.poly(), point, eval))
         })
         .collect();
+
+    println!("sum check done");
+
     Ok((points(&pcs_query, &x), evals))
 }
 
