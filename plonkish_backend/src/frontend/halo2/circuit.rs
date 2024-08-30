@@ -51,6 +51,7 @@ mod vanilla_plonk {
     }
 
     #[derive(Clone, Default)]
+    #[allow(dead_code)]
     pub struct VanillaPlonk<F>(usize, Vec<[Assigned<F>; 8]>);
 
     impl<F: Field> Circuit<F> for VanillaPlonk<F> {
